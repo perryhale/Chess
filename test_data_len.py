@@ -1,12 +1,11 @@
 import time
 import chess.pgn
 
-# start timer
 T0 = time.time()
 
-def count_games(pgn_path):
+def count_moves(pgn_path):
 	count = 0
-	print(f"{count} [Elapsed time: {time.time()-T0:.2f}s]")
+	print(f"[{time.time()-T0:.2f}s] {count} ")
 	with open(pgn_path, encoding="utf-8") as pgn:
 		while True:
 			game = chess.pgn.read_game(pgn)
@@ -14,7 +13,8 @@ def count_games(pgn_path):
 				break
 			for move in game.mainline_moves():
 				count += 1
-				if count % 10_000 == 0:
-					print(f"{count} [Elapsed time: {time.time()-T0:.2f}s]")
+				if count % 1_000 == 0:
+					print(f"[{time.time()-T0:.2f}s] {count}")
 
-count_games("data/lichess_db_standard_rated_2017-03.pgn")
+num_moves = count_moves("data/lichess_db_standard_rated_2017-03.pgn")
+print(f"[{time.time()-T0:.2f}s] {num_moves=}")

@@ -5,7 +5,7 @@ import psutil
 # numerics
 import jax
 import jax.numpy as jnp
-import numpy as np ###! todo use jnp only, optimise host<->accel coms
+import numpy as np
 
 # environment
 import chess # python-chess
@@ -37,14 +37,14 @@ ______________________
 
 ### utility
 
+# type: (int, int) -> jax.Array
 def one_hot(class_idx, n_classes):
-	x = np.zeros(n_classes, dtype=np.float32)
-	x[class_idx] = 1.0
+	x = jnp.zeros(n_classes, dtype=jnp.bool_)
+	x = x.at[class_idx].set(True)
 	return x
 
 
-### action encoder / decoder
-## AlphaZero format
+### AlphaZero format action encoder / decoder (python-chess<-->python)
 
 # define inter/+cardinal directions, (8*7) 0-55
 E4672_DIR = [
@@ -102,8 +102,8 @@ def move_to_idx4672(move):
 	return (r0 * 8 + f0) * 73 + class_offset
 
 
-# type: (int, np.ndarray) -> chess.Move
-def idx4672_to_move(idx4672, vec837):
+# type: (int, chess.Board) -> chess.Move
+def idx4672_to_move(idx4672, board):
 	
 	# derive from-rank/from-file/action
 	from_square, action = divmod(idx4672, 73)
@@ -136,7 +136,7 @@ def idx4672_to_move(idx4672, vec837):
 	to_square = r1 * 8 + f1
 	
 	# handle implicit promotion (directly from state encoding)
-	is_pawn = vec837[(r0 * 8 + f0) * 12] in (1, 6)
+	is_pawn = board.piece_at(from_square).piece_type == chess.PAWN
 	is_prom = r1 in (0, 7)
 	is_impl = promotion_class == None
 	if is_pawn and is_prom and is_impl:
@@ -146,8 +146,7 @@ def idx4672_to_move(idx4672, vec837):
 	return chess.Move(from_square, to_square, promotion=promotion_class)
 
 
-### state encoder / decoder / action mask
-## concatenate positions OHE [768] + turn [1] + castling [4] + enpassant [64]
+### state encoder / decoder / action mask (python-chess<-->numpy)
 
 # type: (chess.Board) -> np.ndarray
 def board_to_vec837(board):
@@ -158,23 +157,23 @@ def board_to_vec837(board):
 	# init constants
 	board_offset = 64 * 12
 	
-	# set position state OHE vectors: (class) 0-5:white, 6-11:black
+	# set position state OHE vectors: (classes 0-5:white, 6-11:black) [0:768] +768
 	for pos_idx, piece in board.piece_map().items():
 		class_idx = piece.piece_type - 1 # classes: [pawn, knight, bishop, rook, queen, king]
 		if not piece.color:
 			class_idx += 6
 		vec837[pos_idx * 12 + class_idx] = True
 	
-	# set turn state: (value) 0:black, 1:white
+	# set turn state: (values F:black, T:white) [768:769] +1
 	vec837[board_offset + 0] = board.turn
 	
-	# set castling states: (value) 0: unavailable, 1: available
+	# set castling states: (values F:unavailable, T:available) [769:773] +4
 	vec837[board_offset + 1] = board.has_kingside_castling_rights(chess.WHITE)
 	vec837[board_offset + 2] = board.has_queenside_castling_rights(chess.WHITE)
 	vec837[board_offset + 3] = board.has_kingside_castling_rights(chess.BLACK)
 	vec837[board_offset + 4] = board.has_queenside_castling_rights(chess.BLACK)
 	
-	# set en-passant states: (value) 0: unavailable, 1: available
+	# set en-passant states: (values 0:unavailable, 1:available) [773:837] +64
 	if board.ep_square is not None:
 		vec837[board_offset + 5 + board.ep_square] = True
 	
@@ -182,7 +181,6 @@ def board_to_vec837(board):
 
 
 # type: (np.ndarray) -> chess.Board
-###! + state decoder
 def vec837_to_board(vec837):
 	
 	# init empty board
@@ -239,7 +237,7 @@ def vec837_to_board(vec837):
 	# decode en-passant square
 	ep_squares = vec837[board_offset + 5:]
 	ep_square = np.argmax(ep_squares)
-	board.ep_square = int(ep_square) if ep_squares[ep_square] > 0.5 else None
+	board.ep_square = int(ep_square) if ep_squares[ep_square] else None
 	
 	return board
 
@@ -252,14 +250,16 @@ def board_to_mask4672(board):
 	return mask
 
 
-### data loader
+### data loader (python-->jax)
 
-# type: (TextIO, int, float, int) -> tuple[jax.Array, jax.Array]
-def stream_pgn_to_supervised(pgn_textio, max_moves=-1, max_memory=0.85, debug=-1):
+# type: (TextIO, int, float, int, float) -> tuple[jax.Array, jax.Array]
+def stream_pgn_to_supervised(pgn_textio, max_moves=-1, max_memory=0.85, debug=-1, start_time=None):
 	states = []
 	actions = []
 	move_counter = 0
 	max_memory_percent = 100 * max_memory
+	if start_time is None:
+		start_time = time.time()
 	
 	# stream up to #max_games games from lichess PGN file
 	while max_moves < 0 or move_counter < max_moves:
@@ -290,7 +290,7 @@ def stream_pgn_to_supervised(pgn_textio, max_moves=-1, max_memory=0.85, debug=-1
 				move_counter += 1
 				
 				if debug > 0 and move_counter % debug == 0:
-					print(f"{move_counter} {memory_percent}%")
+					print(f"[{time.time()-start_time:.2f}s] load {move_counter} ({memory_percent}%)")
 	
 	# construct jax arrays
 	data_x = jnp.asarray(states, dtype=jnp.bool_)
