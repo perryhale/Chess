@@ -94,31 +94,31 @@ def dense_neural_network(params, x, ha=jax.nn.leaky_relu):
 ### optimiser
 
 # type:
-def fit(
+def optimise_params(
 		rng_key,              # jax.Array
 		params,               # PyTree[jax.Array]
-		loss_fn,              # Callable[[PyTree[jax.Array], jax.Array, jax.Array], float]
+		loss_fn,              # Callable[["PyTree[jax.Array]", jax.Array, jax.Array], float]
+		opt_fn,               # Callable[[optax.OptState, "PyTree[jax.Array]", jax.Array, jax.Array], tuple[jax.Array, optax.OptState, "PyTree[jax.Array]"]]
+		opt_state,            # optax.OptState
 		train_data,           # tuple[jax.Array, jax.Array, int]
 		
 		val_data=None,        # tuple[jax.Array, jax.Array, int] | None
 		batch_size=64,        # int
 		epochs=1,             # int
-		opt=optax.sgd(1e-3),  # optax.GradientTransformation
 		
 		start_time=None,      # float | None
-		start_epoch=0,         # int
+		start_epoch=0,        # int
 		use_tqdm=False        # bool
 	):                        # -> tuple[PyTree[jax.Array], Dict[str:list[float]]]
 	"""
-	iteratively update params using gradient descent and scalar loss_fn on batched train_data=(data_x, data_y, train_steps=data_len/batch_size).
-	validation data can be provided in the same format for evaluation _after_ every epoch.
-	batch_size:int, epochs:int and opt:base.GradientTransformationExtraArgs are provided as defaulting call arguments.
-	provides optional reporting args.
+	Iteratively optimise `params` for `loss_fn` and `train_data` using stochastic gradient descent.
+	`train_data=(data_x, data_y, train_steps=data_len/batch_size)`. `val_data` can be provided in the same format for evaluation _after_ every epoch.
+	`batch_size:int`, `epochs:int` are provided as defaulting call arguments.
+	Other optional args for reporting.
 	"""
 	
 	# initialise
 	train_x, train_y, train_steps = train_data
-	opt_state = opt.init(params)
 	history = {'batch_loss':[], 'train_loss':[]}
 	if val_data is not None:
 		val_x, val_y, val_steps = val_data
@@ -126,15 +126,8 @@ def fit(
 		history.update({'val_loss':[]})
 	if start_time is None:
 		start_time = time.time()
-	tqdm_option = lambda _iter,_bool: tqdm(_iter) if _bool else _iter
-	
-	# jit optimiser core
-	@jax.jit
-	def opt_step(_opt_state, _params, xs, ys): ###! extract from function to avoid repeated compilation
-		loss, grad = jax.value_and_grad(loss_fn)(_params, xs, ys)
-		update, _opt_state = opt.update(grad, _opt_state, _params)
-		_params = optax.apply_updates(_params, update)
-		return loss, _opt_state, _params
+	def tqdm_option(_iter, _bool, desc=None):
+		return tqdm(_iter, desc=desc) if _bool else _iter
 	
 	# run training loop
 	###! opt: prevent accel-->host writeback between core steps
@@ -146,8 +139,8 @@ def fit(
 		
 		# iterate optimiser
 		train_loss = 0. ###! accumulate on host
-		for j in tqdm_option(range(train_steps), use_tqdm):
-			batch_loss, opt_state, params = opt_step(opt_state, params, *next(train_generator)) ###! generator defined jax->jax (accel->accel)
+		for j in tqdm_option(range(train_steps), use_tqdm, desc="Train"):
+			batch_loss, opt_state, params = opt_fn(opt_state, params, *next(train_generator)) ###! generator defined jax->jax (accel->accel)
 			batch_loss = float(batch_loss) ###! implicit accel->host
 			train_loss += batch_loss / train_steps ###! O(N) denominator
 			history['batch_loss'].append(batch_loss)
@@ -156,7 +149,7 @@ def fit(
 		# determine validation loss
 		if val_data is not None:
 			val_loss = 0. ###! accumulate on host
-			for _ in tqdm_option(range(val_steps), use_tqdm):
+			for _ in tqdm_option(range(val_steps), use_tqdm, desc="Val"):
 				val_loss += float(loss_fn(params, *next(val_generator))) / val_steps ###! implicit accel->host, O(N) denominator
 			history['val_loss'].append(val_loss)
 		

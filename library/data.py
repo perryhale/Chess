@@ -266,7 +266,7 @@ def stream_pgn_to_supervised(pgn_textio, max_moves=-1, max_memory=0.85, debug=-1
 		
 		# mem safety
 		memory_percent = psutil.virtual_memory().percent
-		if memory_percent > max_memory_percent:
+		if max_memory_percent >= 0 and memory_percent > max_memory_percent:
 			raise RuntimeError(f"memory_percent > max_memory_percent, {memory_percent} > {max_memory_percent}")
 		
 		# initialise game (check EOF)
@@ -277,20 +277,21 @@ def stream_pgn_to_supervised(pgn_textio, max_moves=-1, max_memory=0.85, debug=-1
 		
 		# encode all states and moves from game (check max_moves)
 		for move in game.mainline_moves():
-			if max_moves < 0 or move_counter < max_moves:
-				
-				###! pre-compute mask and pack into input
-				x = jnp.concatenate([board_to_vec837(board), board_to_mask4672(board)])
-				y = move_to_idx4672(move)
-				
-				states.append(x)
-				actions.append(y)
-				
-				board.push(move)
-				move_counter += 1
-				
-				if debug > 0 and move_counter % debug == 0:
-					print(f"[{time.time()-start_time:.2f}s] load {move_counter} ({memory_percent}%)")
+			if max_moves >= 0 and move_counter >= max_moves:
+				break
+			
+			###! pre-compute mask and pack into input
+			x = jnp.concatenate([board_to_vec837(board), board_to_mask4672(board)])
+			y = move_to_idx4672(move)
+			
+			states.append(x)
+			actions.append(y)
+			
+			board.push(move)
+			move_counter += 1
+			
+			if debug > 0 and move_counter % debug == 0:
+				print(f"[{time.time()-start_time:.2f}s] Load {move_counter} ({memory_percent}%)")
 	
 	# construct jax arrays
 	data_x = jnp.asarray(states, dtype=jnp.bool_)

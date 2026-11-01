@@ -61,10 +61,12 @@ def test_state_encoder_decoder_roundtrip(verbose=False):
 
 def test_data_loader_block_uniqueness(verbose=False):
 	
-	lichess_pgn = open("data/lichess_db_standard_rated_2017-03.pgn", "r", encoding="utf-8")
-	data_x, data_y = stream_pgn_to_supervised(lichess_pgn, max_moves=50) # ; import pdb; pdb.set_trace() ###! numpy array takes up more memory than lists
-	data_x1, data_y1 = stream_pgn_to_supervised(lichess_pgn, max_moves=50)
-	lichess_pgn.close()
+	lichess_pgn = open("data/lichess_db_standard_rated_2017-03.pgn", 'r', encoding='utf-8')
+	try:
+		data_x, data_y = stream_pgn_to_supervised(lichess_pgn, max_moves=50) # ; import pdb; pdb.set_trace() ###! numpy array takes up more memory than lists
+		data_x1, data_y1 = stream_pgn_to_supervised(lichess_pgn, max_moves=50)
+	finally:
+		lichess_pgn.close()
 	
 	data_x_differ = bool(np.any(data_x != data_x1))
 	data_y_differ = bool(np.any(data_y != data_y1))
@@ -81,10 +83,10 @@ def test_data_loader_block_uniqueness(verbose=False):
 
 
 def test_data_loader_mem_safety(verbose=False):
-	lichess_pgn = open("data/lichess_db_standard_rated_2017-03.pgn", "r", encoding="utf-8")
+	lichess_pgn = open("data/lichess_db_standard_rated_2017-03.pgn", 'r', encoding='utf-8')
 	try:
-		_ = stream_pgn_to_supervised(lichess_pgn, max_memory=0.3, debug=10_000 if verbose else -1, start_time=T0)
-		raise AssertionError(f"stream_pgn_to_supervised unsafe memory") ###! assumes PGN larger than memory
+		_ = stream_pgn_to_supervised(lichess_pgn, max_memory=0.3, debug=10_000 if verbose else -1, start_time=start_time)
+		raise AssertionError(f"Did not raise RuntimeError") ###! assumes PGN larger than memory
 	except RuntimeError as e:
 		if verbose:
 			print(e)
@@ -96,8 +98,8 @@ if __name__ == "__main__":
 	
 	VERBOSE = len(sys.argv) > 1 and sys.argv[1] == "--verbose"
 	
-	T0 = time.time()
-	print(f"[{time.time()-T0:.2f}s]")
+	start_time = time.time()
+	print(f"[Elapsed time: {time.time()-start_time:.2f}s]")
 	
 	for test_fn in [
 		test_action_encoder_decoder_roundtrip,
@@ -112,4 +114,4 @@ if __name__ == "__main__":
 			_pass = True
 		except AssertionError as e:
 			print(e)
-		print(f"[{time.time()-T0:.2f}s] {test_fn}: {'pass' if _pass else 'fail'}")
+		print(f"[{time.time()-start_time:.2f}s] {test_fn}: {'pass' if _pass else 'fail'}")
