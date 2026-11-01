@@ -130,13 +130,13 @@ def fit(
 	
 	# jit optimiser core
 	@jax.jit
-	def opt_step(_opt_state, _params, xs, ys):
+	def opt_step(_opt_state, _params, xs, ys): ###! extract from function to avoid repeated compilation
 		loss, grad = jax.value_and_grad(loss_fn)(_params, xs, ys)
 		update, _opt_state = opt.update(grad, _opt_state, _params)
 		_params = optax.apply_updates(_params, update)
 		return loss, _opt_state, _params
 	
-	# optimise
+	# run training loop
 	###! opt: prevent accel-->host writeback between core steps
 	for i in range(epochs):
 		

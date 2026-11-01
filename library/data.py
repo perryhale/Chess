@@ -299,6 +299,243 @@ def stream_pgn_to_supervised(pgn_textio, max_moves=-1, max_memory=0.85, debug=-1
 	return data_x, data_y
 
 
+###! multithreading (GIL limited 100% total util)
+
+# import threading
+# import queue
+
+# # type: (TextIO, int, float, int, float, int, int) -> tuple[jax.Array, jax.Array]
+# def stream_pgn_to_supervised(
+		# pgn_textio,
+		# max_moves,
+		# max_memory=0.85,
+		# debug=-1,
+		# start_time=None,
+		# num_workers=4,
+		# max_queue=1000
+	# ):
+	
+	# # pre-allocate arrays
+	# assert max_moves > 0 ###! add dynamic array resizing for unbounded streaming
+	# data_x = np.empty((max_moves, 5509), dtype=np.bool_)
+	# data_y = np.empty((max_moves,), dtype=np.int32)
+	
+	# # initialise task queue
+	# data_queue = queue.Queue(maxsize=max_queue)
+	# move_counter = 0
+	
+	# # mem-safety threshold
+	# max_memory_percent = 100 * max_memory
+	
+	# # logging
+	# if start_time is None:
+		# start_time = time.time()
+	# idle_stats = {i: {"empty_gets": 0, "idle_seconds": 0.0} for i in range(num_workers)}
+	
+	# # start worker threads
+	# def worker(worker_id):
+		# while True:
+			# try:
+				# task = data_queue.get_nowait()
+			# except queue.Empty:
+				# idle_stats[worker_id]["empty_gets"] += 1
+				# start_time = time.time()
+				# task = data_queue.get()
+				# stop_time = time.time()
+				# idle_stats[worker_id]["idle_seconds"] += stop_time - start_time
+
+			# try:
+				# task = data_queue.get()
+				# if task is None: # stop condition
+					# return
+				# idx, board, move = task
+				# data_x[idx, :837] = board_to_vec837(board)
+				# data_x[idx, 837:] = board_to_mask4672(board)
+				# data_y[idx] = move_to_idx4672(move)
+			# finally:
+				# data_queue.task_done()
+	
+	# workers = [threading.Thread(target=worker, args=(i,), daemon=False) for i in range(num_workers)]
+	# for w in workers:
+		# w.start()
+	
+	# # stream up to #max_games games from lichess PGN file
+	# while max_moves < 0 or move_counter < max_moves:
+			
+			# # mem safety
+			# memory_percent = psutil.virtual_memory().percent
+			# if memory_percent > max_memory_percent:
+				# raise RuntimeError(f"memory_percent > max_memory_percent, {memory_percent} > {max_memory_percent}")
+			
+			# # initialise game (check EOF)
+			# game = chess.pgn.read_game(pgn_textio)
+			# if game is None:
+				# break
+			# board = game.board()
+			
+			# # encode all states and moves from game (check max_moves)
+			# for move in game.mainline_moves():
+				# if max_moves < 0 or move_counter < max_moves:
+					# data_queue.put((move_counter, board.copy(), move))
+					
+					# board.push(move)
+					# move_counter += 1
+					
+					# if debug > 0 and move_counter % debug == 0:
+						# print(f"[{time.time()-start_time:.2f}s] load {move_counter} ({memory_percent}%)")
+	
+	# # block until all tasks completed
+	# for _ in workers:
+		# data_queue.put(None)
+	# data_queue.join()
+	# for w in workers:
+		# w.join()
+	
+	# if debug > 0:
+		# print(f"{idle_stats=}")
+	
+	# # construct jax arrays
+	# data_x = jnp.asarray(data_x[:move_counter], dtype=jnp.bool_)
+	# data_y = jnp.asarray(data_y[:move_counter], dtype=jnp.int32)
+	
+	# return data_x, data_y
+
+
+###! multiprocessing (buggy and no performance gain)
+###! + __main__ gate in caller
+
+# import multiprocessing
+# from multiprocessing.shared_memory import SharedMemory
+
+# def _pgn_encode_worker(producer_task_queue, consumer_error_queue, shm_data_x_name, shm_data_y_name, max_moves):
+	
+	# # attach to shared memory buffers
+	# shm_data_x = SharedMemory(name=shm_data_x_name)
+	# shm_data_y = SharedMemory(name=shm_data_y_name)
+	# data_x = np.ndarray((max_moves, 5509), dtype=np.bool_, buffer=shm_data_x.buf)
+	# data_y = np.ndarray((max_moves,), dtype=np.int32, buffer=shm_data_y.buf)
+	
+	# # poll the task queue
+	# try:
+		# while True:
+			# task = producer_task_queue.get()
+			# try:
+				# if task is None: # stop sentinel
+					# return
+				
+				# # write to shared memory
+				# idx, board, move = task
+				# data_x[idx, :837] = board_to_vec837(board)
+				# data_x[idx, 837:] = board_to_mask4672(board)
+				# data_y[idx] = move_to_idx4672(move)
+			
+			# except Exception as e:
+				# consumer_error_queue.put(e)
+			# finally:
+				# producer_task_queue.task_done()
+	# finally:
+		# shm_data_x.close()
+		# shm_data_y.close()
+
+
+# def stream_pgn_to_supervised(
+		# pgn_textio,
+		# max_moves=100_000_000,
+		# max_memory=0.85,
+		# debug=-1,
+		# start_time=None,
+		# num_workers=4,
+		# max_queue=100,
+	# ):
+	
+	# assert max_moves > 0
+	
+	# # init producer states
+	# move_counter = 0
+	# max_memory_percent = 100 * max_memory
+	# if start_time is None:
+		# start_time = time.time()
+	
+	# # init shared memory
+	# data_x_shm = SharedMemory(create=True, size=max_moves * 5509 * np.dtype(np.bool_).itemsize)
+	# data_y_shm = SharedMemory(create=True, size=max_moves * np.dtype(np.int32).itemsize)
+	# data_x = np.ndarray((max_moves, 5509), dtype=np.bool_, buffer=data_x_shm.buf)
+	# data_y = np.ndarray((max_moves,), dtype=np.int32, buffer=data_y_shm.buf)
+	
+	# # init producer/consumer processes
+	# process_context = multiprocessing.get_context("spawn")
+	# producer_error = None
+	# producer_task_queue = process_context.JoinableQueue(maxsize=max_queue)
+	# consumer_error_queue = process_context.Queue()
+	# consumers = [process_context.Process(target=_pgn_encode_worker, args=(
+		# producer_task_queue,
+		# consumer_error_queue,
+		# data_x_shm.name,
+		# data_y_shm.name,
+		# max_moves
+	# )) for _ in range(num_workers)]
+	
+	# try:
+		
+		# # start consumers
+		# for w in consumers:
+			# w.start()
+		
+		# # start producer
+		# while move_counter < max_moves:
+			
+			# # memory-safety
+			# memory_percent = psutil.virtual_memory().percent
+			# if memory_percent > max_memory_percent:
+				# raise RuntimeError(f"memory_percent > max_memory: {memory_percent} > {100 * max_memory}")
+			
+			# # initialise game (check EOF)
+			# game = chess.pgn.read_game(pgn_textio)
+			# if game is None:
+				# break
+			# board = game.board()
+			
+			# # queue all states and moves from game (check max_moves)
+			# for move in game.mainline_moves():
+				# if move_counter >= max_moves:
+					# break
+				# producer_task_queue.put((move_counter, board.copy(), move))
+				# board.push(move)
+				# move_counter += 1
+				# if debug > 0 and move_counter % debug == 0:
+					# print(f"[{time.time() - start_time:.2f}s] load {move_counter} ({memory_percent}%)")
+		
+		# # block until all consumers completed
+		# for _ in consumers:
+			# producer_task_queue.put(None)
+		# producer_task_queue.join()
+		# for w in consumers:
+			# w.join()
+		
+		# # propagate consumer errors
+		# if not consumer_error_queue.empty():
+			# raise consumer_error_queue.get()
+		
+		# # propagate non-zero consumer exit codes
+		# if [w.exitcode for w in consumers if w.exitcode != 0]:
+			# raise RuntimeError(f"Non-zero consumer exit.")
+		
+		# # construct jax arrays independently of shmem
+		# data_x_jax = jnp.asarray(np.array(data_x[:move_counter], copy=True), dtype=jnp.bool_)
+		# data_y_jax = jnp.asarray(np.array(data_y[:move_counter], copy=True), dtype=jnp.int32)
+	
+	# # always close shmem
+	# finally:
+		# producer_task_queue.close()
+		# consumer_error_queue.close()
+		# data_x_shm.close()
+		# data_y_shm.close()
+		# data_x_shm.unlink()
+		# data_y_shm.unlink()
+	
+	# return data_x_jax, data_y_jax
+
+
 # type: (jax.Array, jax.Array, int, bool) ~> tuple[jax.Array, jax.Array]
 def batch_generator(data_x, data_y, batch_size, shuffle_key=None):
 	

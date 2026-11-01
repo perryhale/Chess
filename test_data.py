@@ -94,10 +94,10 @@ def test_data_loader_mem_safety(verbose=False):
 
 if __name__ == "__main__":
 	
+	VERBOSE = len(sys.argv) > 1 and sys.argv[1] == "--verbose"
+	
 	T0 = time.time()
 	print(f"[{time.time()-T0:.2f}s]")
-	
-	verbose = len(sys.argv) > 1 and sys.argv[1] == "--verbose"
 	
 	for test_fn in [
 		test_action_encoder_decoder_roundtrip,
@@ -108,7 +108,7 @@ if __name__ == "__main__":
 	]:
 		_pass = False
 		try:
-			test_fn(verbose=verbose)
+			test_fn(verbose=VERBOSE)
 			_pass = True
 		except AssertionError as e:
 			print(e)
