@@ -13,6 +13,10 @@ from library.data import (
 )
 
 
+###! test action encoder/decoder knight move
+###! test action encoder/decoder underpromotion move
+
+
 def test_action_encoder_decoder_roundtrip(verbose=False):
 	
 	board = chess.Board()

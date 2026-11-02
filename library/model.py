@@ -94,7 +94,7 @@ def dense_neural_network(params, x, ha=jax.nn.leaky_relu):
 ### optimiser
 
 # type:
-def optimise_params(
+def fit(
 		rng_key,              # jax.Array
 		params,               # PyTree[jax.Array]
 		loss_fn,              # Callable[["PyTree[jax.Array]", jax.Array, jax.Array], float]
@@ -161,7 +161,7 @@ def optimise_params(
 			+ f" val_loss={val_loss:.4f}" if val_data is not None else ""
 		)
 	
-	return params, history
+	return params, opt_state, history
 
 
 ### metrics

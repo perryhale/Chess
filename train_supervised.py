@@ -9,14 +9,14 @@ import jax.numpy as jnp
 import optax
 
 from library.data import stream_pgn_to_supervised
-from library.model import init_dense_neural_network, dense_neural_network, optimise_params
+from library.model import init_dense_neural_network, dense_neural_network, fit
 
 
 try:
 	
 	# unpack args
-	NO_CACHE = len(sys.argv) > 1 and sys.argv[1] == "--no-cache"
-	USE_TQDM = len(sys.argv) > 2 and sys.argv[2] == "--use-tqdm"
+	NO_CACHE = "--no-cache" in sys.argv
+	USE_TQDM = "--use-tqdm" in sys.argv
 	
 	# try cache
 	if NO_CACHE:
@@ -78,7 +78,7 @@ if __name__ == "__main__":
 			
 			# init optimiser
 			opt = optax.adamw(1e-4)
-			opt_state = opt.init(policy)
+			opt_state = opt.init(policy) ###! resume requires storing opt_state, k0, and lichess_pgn.tell() (for .seek(p)) and epoch
 			
 			# jit compile optimiser core
 			@jax.jit
@@ -98,7 +98,7 @@ if __name__ == "__main__":
 					break
 				
 				k0, k1 = jax.random.split(k0)
-				policy, _history = optimise_params(
+				policy, opt_state, _history = fit(
 					k1,
 					policy,
 					loss_fn,

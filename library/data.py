@@ -125,7 +125,7 @@ def idx4672_to_move(idx4672, board):
 	
 	# decode under-promotion translation and character
 	else:
-		dir_class, piece_idx = divmod(channel - 64, 3)
+		dir_class, piece_idx = divmod(action - 64, 3)
 		dr = 1 if r0 == 6 else -1 # up if white, down if black
 		df = (dir_class - 1) * dr # right if white, left if black
 		promotion_class = E4672_UNDER_PROM[piece_idx]
