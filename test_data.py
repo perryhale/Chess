@@ -89,7 +89,7 @@ def test_data_loader_block_uniqueness(verbose=False):
 def test_data_loader_mem_safety(verbose=False):
 	lichess_pgn = open("data/lichess_db_standard_rated_2017-03.pgn", 'r', encoding='utf-8')
 	try:
-		_ = stream_pgn_to_supervised(lichess_pgn, max_memory=0.3, debug=10_000 if verbose else -1, start_time=start_time)
+		_ = stream_pgn_to_supervised(lichess_pgn, max_memory=0.3, trace=10_000 if verbose else -1, start_time=start_time)
 		raise AssertionError(f"Did not raise RuntimeError") ###! assumes PGN larger than memory
 	except RuntimeError as e:
 		if verbose:

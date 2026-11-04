@@ -56,7 +56,7 @@ if __name__ == "__main__":
 	# init model
 	policy = CFG.policy if CFG.policy else init_dense_neural_network(k0, [837, *CFG.hidden_layers, 4672])
 	policy_fn = jax.vmap(lambda p,x: jnp.where(x[837:], -jnp.inf, dense_neural_network(p, x[:837].astype(jnp.float32))), in_axes=(None, 0))
-	loss_fn = lambda p,xs,ys: jnp.mean(optax.softmax_cross_entropy_with_integer_labels(policy_fn(p, xs), ys))
+	loss_fn = jax.jit(lambda p,xs,ys: jnp.mean(optax.softmax_cross_entropy_with_integer_labels(policy_fn(p, xs), ys)))
 	
 	# open data stream
 	lichess_pgn = open(CFG.pgn_path, 'r', encoding='utf-8')
@@ -65,8 +65,8 @@ if __name__ == "__main__":
 	try:
 		
 		# load test/val blocks
-		test_x, test_y = stream_pgn_to_supervised(lichess_pgn, max_moves=CFG.test_block_size, debug=CFG.test_block_size, start_time=start_time)
-		val_x, val_y = stream_pgn_to_supervised(lichess_pgn, max_moves=CFG.val_block_size, debug=CFG.val_block_size, start_time=start_time)
+		test_x, test_y = stream_pgn_to_supervised(lichess_pgn, max_moves=CFG.test_block_size, trace=CFG.test_block_size, start_time=start_time)
+		val_x, val_y = stream_pgn_to_supervised(lichess_pgn, max_moves=CFG.val_block_size, trace=CFG.val_block_size, start_time=start_time)
 		
 		# determine step counts
 		test_steps = int(jnp.ceil(CFG.test_block_size / CFG.batch_size))
@@ -88,10 +88,13 @@ if __name__ == "__main__":
 				_policy = optax.apply_updates(_policy, update)
 				return loss, _opt_state, _policy
 			
+			# init checkpoint best-validation-loss threshold
+			best_val_loss = float('inf')
+			
 			for i in range(CFG.train_block_count):
 				
 				# load train block (check EOF)
-				train_x, train_y = stream_pgn_to_supervised(lichess_pgn, max_moves=CFG.train_block_size, debug=CFG.train_block_size, start_time=start_time,
+				train_x, train_y = stream_pgn_to_supervised(lichess_pgn, max_moves=CFG.train_block_size, trace=CFG.train_block_size, start_time=start_time,
 					max_memory=-1 ###! disable mem safety
 				)
 				if train_x.shape[0] == 0:
@@ -121,11 +124,15 @@ if __name__ == "__main__":
 					CFG.history['batch_loss'].extend(_history['batch_loss'])
 					CFG.history['train_loss'].extend(_history['train_loss'])
 					CFG.history['val_loss'].extend(_history['val_loss'])
-			
-			# update cache
-			CFG.policy = policy
-			with open(f"{__file__.replace('.py','')}.cache.pkl", 'wb') as f:
-				pickle.dump(CFG, f)
+				
+				# update cache
+				val_loss = CFG.history['val_loss'][-1]
+				if val_loss < best_val_loss:
+					print(f"[{time.time()-start_time:.2f}s] val_loss < best_val_loss, {val_loss:.4f} < {best_val_loss:.4f}")
+					best_val_loss = val_loss
+					with open(f"{__file__.replace('.py','')}.cache.pkl", 'wb') as f:
+						CFG.policy = policy
+						pickle.dump(CFG, f)
 	
 	finally:
 		

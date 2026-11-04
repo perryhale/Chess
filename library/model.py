@@ -4,9 +4,7 @@ import jax
 import jax.numpy as jnp
 import optax
 
-from tqdm import tqdm
-
-from .data import batch_generator
+from .data import tqdm_option, batch_generator
 
 """
 
@@ -126,8 +124,6 @@ def fit(
 		history.update({'val_loss':[]})
 	if start_time is None:
 		start_time = time.time()
-	def tqdm_option(_iter, _bool, desc=None):
-		return tqdm(_iter, desc=desc) if _bool else _iter
 	
 	# run training loop
 	###! opt: prevent accel-->host writeback between core steps
