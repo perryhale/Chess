@@ -3,3 +3,4 @@ optax
 numpy
 python-chess
 psutil
+tqdm
