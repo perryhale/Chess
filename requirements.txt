@@ -4,3 +4,4 @@ numpy
 python-chess
 psutil
 tqdm
+matplotlib
