@@ -99,11 +99,9 @@ def fit(
 		opt_fn,               # Callable[[optax.OptState, "PyTree[jax.Array]", jax.Array, jax.Array], tuple[jax.Array, optax.OptState, "PyTree[jax.Array]"]]
 		opt_state,            # optax.OptState
 		train_data,           # tuple[jax.Array, jax.Array, int]
-		
 		val_data=None,        # tuple[jax.Array, jax.Array, int] | None
 		batch_size=64,        # int
 		epochs=1,             # int
-		
 		start_time=None,      # float | None
 		start_epoch=0,        # int
 		use_tqdm=False        # bool
