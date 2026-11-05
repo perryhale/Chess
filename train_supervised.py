@@ -198,8 +198,8 @@ if __name__ == "__main__":
 	)
 	
 	plt.grid()
-	plt.ylabel("loss")
-	plt.xlabel("train step")
+	plt.ylabel("Loss")
+	plt.xlabel("Train step")
 	plt.legend()
 	plt.tight_layout()
 	if SAVE_FIG:

@@ -355,6 +355,13 @@ def stream_pgn_to_supervised(pgn_textio, max_moves=-1, max_memory=0.85, trace=-1
 			if game is None:
 				break
 			
+			# filter games by ELO rating
+			###! https://georgelichess.com/chess-rating-percentiles
+			elo_threshold = 1800 # top quartile (25% players)
+			###! if both players are below threshold continue in loop
+			if max(int(game.headers.get('WhiteElo', 0)), int(game.headers.get('BlackElo', 0))) < elo_threshold:
+				continue
+			
 			# extract moves under max_moves
 			moves = list(game.mainline_moves())
 			if max_moves >= 0:
