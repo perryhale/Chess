@@ -35,13 +35,15 @@ except FileNotFoundError:
 	# init default
 	CFG = SimpleNamespace(
 		pgn_path = "data/lichess_db_standard_rated_2017-03.pgn",
-		batch_size = 8,#4,
-		train_block_count = 20,#0,
-		train_block_size = 160,#_000,
-		val_block_size = 10,#_000,
-		test_block_size = 40,#_000,
 		rng_seed = 9,
-		hidden_layers = [1024, 1024],
+		batch_size = 128,
+		train_block_count = 25,#0,
+		train_block_size = 2_000,#_000,
+		train_epochs_per_block = 1,
+		val_block_size = 100,#_000,
+		test_block_size = 400,#_000,
+		hidden_layers = [2048],# * 3,
+		eta = 1e-4,
 		policy = None,
 		history = None
 	)
@@ -90,7 +92,7 @@ if __name__ == "__main__":
 			val_x, val_y = stream_pgn_to_supervised(lichess_pgn, max_moves=CFG.val_block_size, trace=CFG.val_block_size, start_time=start_time)
 			
 			# init optimiser
-			opt = optax.adamw(1e-4)
+			opt = optax.adamw(CFG.eta)
 			opt_state = opt.init(policy) ###! resume requires storing opt_state, k0, and lichess_pgn.tell() (for .seek(p)) and epoch
 			
 			# jit compile optimiser core
@@ -124,7 +126,8 @@ if __name__ == "__main__":
 					val_data=(val_x, val_y, val_steps),
 					batch_size=CFG.batch_size,
 					start_time=start_time,
-					start_epoch=i,
+					start_epoch=i * CFG.train_epochs_per_block,
+					epochs=CFG.train_epochs_per_block,
 					use_tqdm=USE_TQDM
 				)
 				

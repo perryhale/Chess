@@ -9,7 +9,8 @@ from .data import tqdm_option, batch_generator
 """
 
 ________________________________________________________
-init   |  U(-gs,+gs)           |  Glorot uniform
+init   |  U(-/+sqrt(2/fi+fo))  |  Glorot uniform
+init   |  U(-/+sqrt(6/fi))     |  He uniform
 model  |  MLP: R^N -> R^K      |  MLP(p,x)->yh
 loss   |  CCE: R^K x R^K -> R  |  CCE(yh,y)->l
 optim  |  ~SGD: Θ x B -> Θ     |  OPT(s,p,x,y)->l,sh,ph
@@ -18,6 +19,7 @@ ________________________________________________________
 
 initialiser
  - Glorot uniform
+ - He uniform
 
 model
  - masked Multi-Layer Perceptron (LReLU)
@@ -44,7 +46,18 @@ def init_glorot_uniform(rng_key, shape, fan_in, fan_out):
 	# fan_in, fan_out inZ+
 	# w inR shape
 	"""
-	limit = jnp.sqrt(6) / jnp.sqrt(fan_in+fan_out)
+	limit = jnp.sqrt(2) / jnp.sqrt(fan_in+fan_out)
+	w = jax.random.uniform(rng_key, shape, minval=-limit, maxval=limit)
+	return w
+
+# type: (int, list[int], int) -> jax.Array
+def init_he_uniform(rng_key, shape, fan_in):
+	"""
+	# shape inZ+ (*)
+	# fan_in inZ+
+	# w inR shape
+	"""
+	limit = jnp.sqrt(6) / jnp.sqrt(fan_in)
 	w = jax.random.uniform(rng_key, shape, minval=-limit, maxval=limit)
 	return w
 
@@ -56,13 +69,13 @@ def init_dense_neural_network(rng_key, layers):
 	rng_key, k1 = jax.random.split(rng_key)
 	
 	# initialise input layer
-	w_list = [init_glorot_uniform(k1, (layers[1], layers[0]), layers[0], layers[1])]
+	w_list = [init_he_uniform(k1, (layers[1], layers[0]), layers[0])]
 	b_list = [jnp.zeros((layers[1], 1))]
 	
 	# initialise hidden layers
 	for i in range(1, len(layers)-1):
 		k1, k2 = jax.random.split(k1)
-		w_list.append(init_glorot_uniform(k2, (layers[i+1], layers[i]), layers[i], layers[i+1]))
+		w_list.append(init_he_uniform(k2, (layers[i+1], layers[i]), layers[i]))
 		b_list.append(jnp.zeros((layers[i+1], 1)))
 	
 	return list(map(tuple, zip(w_list, b_list)))
@@ -71,8 +84,8 @@ def init_dense_neural_network(rng_key, layers):
 # type: (list[tuple[jax.Array, jax.Array]], jax.Array, Callable[[jax.Array]]) -> jax.Array
 def dense_neural_network(params, x, ha=jax.nn.leaky_relu):
 	"""
-	# x inR (in, 1)
-	# z inR (out, 1)
+	# x inR (in)
+	# z inR (out)
 	"""
 	
 	# shape-safe I/O activations
@@ -118,34 +131,38 @@ def fit(
 	history = {'batch_loss':[], 'train_loss':[]}
 	if val_data is not None:
 		val_x, val_y, val_steps = val_data
-		val_generator = batch_generator(val_x, val_y, batch_size)
+		val_generator = batch_generator(val_x, val_y, batch_size) ###! (strictly assumes #steps==one-generator-pass)
 		history.update({'val_loss':[]})
 	if start_time is None:
 		start_time = time.time()
 	
 	# run training loop
-	###! opt: prevent accel-->host writeback between core steps
 	for i in range(epochs):
 		
 		# shuffle train batches
 		rng_key, subkey = jax.random.split(rng_key, 2)
 		train_generator = batch_generator(train_x, train_y, batch_size, shuffle_key=subkey)
 		
-		# iterate optimiser
-		train_loss = 0. ###! accumulate on host
+		# apply updates
+		batch_losses = []
+		train_loss = 0.
 		for j in tqdm_option(range(train_steps), use_tqdm, desc="Train"):
-			batch_loss, opt_state, params = opt_fn(opt_state, params, *next(train_generator)) ###! generator defined jax->jax (accel->accel)
-			batch_loss = float(batch_loss) ###! implicit accel->host
-			train_loss += batch_loss / train_steps ###! O(N) denominator
-			history['batch_loss'].append(batch_loss)
-		history['train_loss'].append(train_loss)
+			batch_loss, opt_state, params = opt_fn(opt_state, params, *next(train_generator))
+			train_loss += batch_loss / train_steps ###! lossy, O(N)
+			batch_losses.append(batch_loss)
 		
-		# determine validation loss
+		# compute validation loss
 		if val_data is not None:
-			val_loss = 0. ###! accumulate on host
+			val_loss = 0.
 			for _ in tqdm_option(range(val_steps), use_tqdm, desc="Val"):
-				val_loss += float(loss_fn(params, *next(val_generator))) / val_steps ###! implicit accel->host, O(N) denominator
-			history['val_loss'].append(val_loss)
+				val_loss += loss_fn(params, *next(val_generator)) / val_steps ###! lossy, O(N)
+		
+		# transfer logs to host
+		batch_losses, train_loss = jax.device_get((jnp.asarray(batch_losses), train_loss))
+		history['batch_loss'].extend(batch_losses.tolist())
+		history['train_loss'].append(float(train_loss))
+		if val_data is not None:
+			history['val_loss'].append(float(val_loss))
 		
 		# trace to stdout
 		print(
