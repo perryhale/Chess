@@ -324,7 +324,16 @@ def _encode_game_fn(fen, moves):
 
 
 # type: (TextIO, int, float, int, float | None, int, int) -> tuple[jax.Array, jax.Array]
-def stream_pgn_to_supervised(pgn_textio, max_moves=-1, max_memory=0.85, trace=-1, start_time=None, num_workers=4, max_queue_per_worker=2):
+def stream_pgn_to_supervised(
+		pgn_textio,
+		max_moves=-1,
+		max_memory=0.85,
+		trace=-1,
+		start_time=None,
+		num_workers=4,
+		max_queue_per_worker=2,
+		elo_threshold=1800 ###! https://georgelichess.com/chess-rating-percentiles top quartile (25% players)
+	):
 	
 	# init structures for requested block or unbounded moves
 	data_x = np.empty((max(0, max_moves), 5509), dtype=np.bool_)
@@ -355,11 +364,12 @@ def stream_pgn_to_supervised(pgn_textio, max_moves=-1, max_memory=0.85, trace=-1
 			if game is None:
 				break
 			
-			# filter games by ELO rating
-			###! https://georgelichess.com/chess-rating-percentiles
-			elo_threshold = 1800 # top quartile (25% players)
-			###! if either player is below threshold continue in loop
-			if min(int(game.headers.get('WhiteElo', 0)), int(game.headers.get('BlackElo', 0))) < elo_threshold:
+			# filter games by min ELO rating
+			min_elo = min(
+				int(game.headers.get('WhiteElo', 0)),
+				int(game.headers.get('BlackElo', 0))
+			)
+			if min_elo < elo_threshold:
 				continue
 			
 			# extract moves under max_moves
@@ -387,7 +397,7 @@ def stream_pgn_to_supervised(pgn_textio, max_moves=-1, max_memory=0.85, trace=-1
 		
 		# trace
 		if trace > 0 and stop_move_count >= _move_trace:
-			print(f"[{time.time()-start_time:.2f}s] Load {stop_move_count} ({psutil.virtual_memory().percent}%)")
+			print(f"[{time.time()-start_time:.2f}s] Load {stop_move_count} Elo {elo_threshold:.0f} ({psutil.virtual_memory().percent}%)")
 			_move_trace = (stop_move_count // trace + 1) * trace
 		
 		return stop_move_count, _move_trace

@@ -37,13 +37,14 @@ except FileNotFoundError:
 		pgn_path = "data/lichess_db_standard_rated_2017-03.pgn",
 		rng_seed = 9,
 		batch_size = 128,
-		train_block_count = 25,#0,
+		train_block_count = 5,# 250,
 		train_block_size = 2_000,#_000,
 		train_epochs_per_block = 1,
 		val_block_size = 100,#_000,
 		test_block_size = 400,#_000,
 		hidden_layers = [2048],# * 3,
 		eta = 1e-4,
+		elo_warmup_steps = (2_00),#0_000 / 250) * 100,
 		policy = None,
 		history = None
 	)
@@ -78,7 +79,12 @@ if __name__ == "__main__":
 	try:
 		
 		# load test block
-		test_x, test_y = stream_pgn_to_supervised(lichess_pgn, max_moves=CFG.test_block_size, trace=CFG.test_block_size, start_time=start_time)
+		test_x, test_y = stream_pgn_to_supervised(
+			lichess_pgn,
+			max_moves=CFG.test_block_size,
+			trace=CFG.test_block_size,
+			start_time=start_time
+		)
 		
 		# determine step counts
 		test_steps = int(jnp.ceil(CFG.test_block_size / CFG.batch_size))
@@ -89,7 +95,12 @@ if __name__ == "__main__":
 		if not CFG.policy:
 			
 			# load val block
-			val_x, val_y = stream_pgn_to_supervised(lichess_pgn, max_moves=CFG.val_block_size, trace=CFG.val_block_size, start_time=start_time)
+			val_x, val_y = stream_pgn_to_supervised(
+				lichess_pgn,
+				max_moves=CFG.val_block_size,
+				trace=CFG.val_block_size,
+				start_time=start_time
+			)
 			
 			# init optimiser
 			opt = optax.adamw(CFG.eta)
@@ -108,8 +119,16 @@ if __name__ == "__main__":
 			
 			for i in range(CFG.train_block_count):
 				
+				# curriculum function
+				elo_threshold = min(1, (i * CFG.train_epochs_per_block * train_steps + 1e-5) / CFG.elo_warmup_steps) * 1800
+				
 				# load train block (check EOF)
-				train_x, train_y = stream_pgn_to_supervised(lichess_pgn, max_moves=CFG.train_block_size, trace=CFG.train_block_size, start_time=start_time,
+				train_x, train_y = stream_pgn_to_supervised(
+					lichess_pgn,
+					max_moves=CFG.train_block_size,
+					trace=CFG.train_block_size,
+					start_time=start_time,
+					elo_threshold=elo_threshold,
 					max_memory=-1 ###! disable mem safety
 				)
 				if train_x.shape[0] == 0:
@@ -186,26 +205,29 @@ if __name__ == "__main__":
 	batch_axis = list(range(1, len(batch_loss) + 1))
 	epoch_axis = batch_axis[train_steps-1::train_steps]
 	
-	plt.plot(batch_axis, batch_loss, color="purple", label="batch_loss")
-	plt.plot(epoch_axis, train_loss, color="blue", label="train_loss")
-	plt.plot(epoch_axis, val_loss, color="red", label="val_loss")
-	plt.scatter(batch_axis[-1], test_loss, color="green", marker="x", label="test_loss")
-	plt.gca().text(
+	fig, ax = plt.subplots(figsize=(9, 7))
+	
+	ax.plot(batch_axis, batch_loss, color="purple", label="batch_loss", linewidth=0.5)
+	ax.plot(epoch_axis, train_loss, color="blue", label="train_loss")
+	ax.plot(epoch_axis, val_loss, color="red", label="val_loss")
+	ax.scatter(batch_axis[-1], test_loss, color="green", marker="x", label="test_loss")
+	ax.text(
 		0.5, 0.98,
 		f"Test accuracy: {test_accuracy:.1f}%",
-		transform=plt.gca().transAxes,
+		transform=ax.transAxes,
 		ha="center",
 		va="top",
 		color="white",
 		bbox=dict(facecolor="black", edgecolor="black", boxstyle="square,pad=0.4"),
 	)
 	
-	plt.grid()
-	plt.ylabel("Loss")
-	plt.xlabel("Train step")
-	plt.legend()
-	plt.tight_layout()
+	ax.grid()
+	ax.set_ylabel("Loss")
+	ax.set_xlabel("Train step")
+	ax.legend()
+	fig.tight_layout()
 	if SAVE_FIG:
 		plt.savefig(FIG_PATH)
 	else:
 		plt.show()
+	plt.clf()
