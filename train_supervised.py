@@ -12,7 +12,32 @@ import matplotlib.pyplot as plt
 from library.data import tqdm_option, stream_pgn_to_supervised, batch_generator
 from library.model import init_dense_neural_network, dense_neural_network, fit
 
-	
+
+### constants
+
+PGN_PATH = "data/lichess_db_standard_rated_2017-03.pgn"
+
+RNG_SEED = 9
+BATCH_SIZE = 128
+
+TRAIN_BLOCK_COUNT = 5 # 250,
+TRAIN_BLOCK_SIZE = 2_000 #_000
+VAL_BLOCK_SIZE = 100 #_000
+TEST_BLOCK_SIZE = 400 #_000
+
+HIDDEN_LAYERS = [2048] # * 3,
+
+EPOCHS_PER_TRAIN_BLOCK = 1
+ETA = 1e-4
+ELO_WARMUP_STEPS = 0 #(2_00),#0_000 / 250) * 100,
+ELO_MIN = 1800
+
+POLICY = None
+HISTORY = None
+
+
+### main
+
 # unpack args
 NO_CACHE = "--no-cache" in sys.argv
 USE_TQDM = "--use-tqdm" in sys.argv
@@ -34,19 +59,20 @@ except FileNotFoundError:
 	
 	# init default
 	CFG = SimpleNamespace(
-		pgn_path = "data/lichess_db_standard_rated_2017-03.pgn",
-		rng_seed = 9,
-		batch_size = 128,
-		train_block_count = 5,# 250,
-		train_block_size = 2_000,#_000,
-		train_epochs_per_block = 1,
-		val_block_size = 100,#_000,
-		test_block_size = 400,#_000,
-		hidden_layers = [2048],# * 3,
-		eta = 1e-4,
-		elo_warmup_steps = (2_00),#0_000 / 250) * 100,
-		policy = None,
-		history = None
+		pgn_path=PGN_PATH,
+		rng_seed=RNG_SEED,
+		batch_size=BATCH_SIZE,
+		train_block_count=TRAIN_BLOCK_COUNT,
+		train_block_size=TRAIN_BLOCK_SIZE,
+		train_epochs_per_block=EPOCHS_PER_TRAIN_BLOCK,
+		val_block_size=VAL_BLOCK_SIZE,
+		test_block_size=TEST_BLOCK_SIZE,
+		hidden_layers=HIDDEN_LAYERS,
+		eta=ETA,
+		elo_warmup_steps=ELO_WARMUP_STEPS,
+		elo_min=ELO_MIN,
+		policy=POLICY,
+		history=HISTORY,
 	)
 
 
@@ -83,7 +109,8 @@ if __name__ == "__main__":
 			lichess_pgn,
 			max_moves=CFG.test_block_size,
 			trace=CFG.test_block_size,
-			start_time=start_time
+			start_time=start_time,
+			elo_threshold = CFG.elo_min
 		)
 		
 		# determine step counts
@@ -99,7 +126,8 @@ if __name__ == "__main__":
 				lichess_pgn,
 				max_moves=CFG.val_block_size,
 				trace=CFG.val_block_size,
-				start_time=start_time
+				start_time=start_time,
+				elo_threshold = CFG.elo_min
 			)
 			
 			# init optimiser
@@ -120,7 +148,7 @@ if __name__ == "__main__":
 			for i in range(CFG.train_block_count):
 				
 				# curriculum function
-				elo_threshold = min(1, (i * CFG.train_epochs_per_block * train_steps + 1e-5) / CFG.elo_warmup_steps) * 1800
+				elo_threshold = min(1, (i * CFG.train_epochs_per_block * train_steps) / (CFG.elo_warmup_steps + 1e-9)) * CFG.elo_min
 				
 				# load train block (check EOF)
 				train_x, train_y = stream_pgn_to_supervised(

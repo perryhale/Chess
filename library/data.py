@@ -397,7 +397,7 @@ def stream_pgn_to_supervised(
 		
 		# trace
 		if trace > 0 and stop_move_count >= _move_trace:
-			print(f"[{time.time()-start_time:.2f}s] Load {stop_move_count} Elo {elo_threshold:.0f} ({psutil.virtual_memory().percent}%)")
+			print(f"[{time.time()-start_time:.2f}s] Load {stop_move_count} Elo >{elo_threshold:.0f} ({psutil.virtual_memory().percent}%)")
 			_move_trace = (stop_move_count // trace + 1) * trace
 		
 		return stop_move_count, _move_trace
